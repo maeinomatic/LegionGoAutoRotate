@@ -147,7 +147,7 @@ internal sealed class AutoRotateController : IDisposable
                 var target =
                     (_sensorToDisplayOffset.Value - sensorTurn + 4) & 3;
 
-                DisplayRotator.RotateTo(target);
+                DisplayRotator.TryRotateTo(target);
             }
             catch (OperationCanceledException)
             {
@@ -168,16 +168,17 @@ internal sealed class AutoRotateController : IDisposable
         if (_sensorToDisplayOffset is not null)
             return;
 
-        if (!TryGetQuarterTurn(sensorOrientation, out var sensorTurn))
+        if (!TryGetQuarterTurn(sensorOrientation, out _))
             return;
 
-        var displayTurn = DisplayRotator.GetCurrentOrientation();
-
         /*
-         * Corrected Legion Go 2 mapping.
+         * The Legion Go 2 has a fixed sensor/display relationship.
+         *
+         * Do not derive this from the targeted display's raw DEVMODE
+         * orientation: the built-in panel can report its native panel
+         * rotation here, which reintroduces the 90° startup offset.
          */
-        _sensorToDisplayOffset =
-            (displayTurn + sensorTurn) & 3;
+        _sensorToDisplayOffset = 0;
     }
 
     private static bool TryGetQuarterTurn(
