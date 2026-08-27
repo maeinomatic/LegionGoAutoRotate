@@ -58,6 +58,6 @@ The resulting executable can be found in the `publish` directory.
 
 ## Current Limitations
 
-The application currently rotates the Windows primary display. Behavior with external monitors or docked configurations has not yet been fully tested.
+The application targets the active built-in Legion Go 2 display and leaves external displays untouched. If the built-in display is disabled, automatic rotation safely does nothing.
 
 This project was created specifically for the Lenovo Legion Go 2. Other Windows devices with a compatible orientation sensor may work, but are currently untested.
