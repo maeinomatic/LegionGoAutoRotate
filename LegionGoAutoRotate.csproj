@@ -9,4 +9,9 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove=".tmp\**\*.cs" />
+    <Compile Remove="tools\**\*.cs" />
+  </ItemGroup>
+
 </Project>

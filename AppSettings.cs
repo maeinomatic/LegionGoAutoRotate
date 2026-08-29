@@ -2,6 +2,7 @@ using System.Text.Json;
 
 internal sealed class AppSettings
 {
+    public bool RotateWithControllersAttached { get; set; }
 }
 
 internal static class AppSettingsStore
