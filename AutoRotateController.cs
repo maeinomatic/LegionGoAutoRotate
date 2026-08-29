@@ -12,46 +12,60 @@ internal sealed class AutoRotateController : IDisposable
     public bool IsRunning { get; private set; }
 
     public bool Start()
-{
-    if (IsRunning)
+    {
+        if (IsRunning)
+            return true;
+
+        try
+        {
+            _sensor ??= SimpleOrientationSensor.GetDefault();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("SimpleOrientationSensor initialization failed.", ex);
+            return false;
+        }
+
+        if (_sensor is null)
+        {
+            AppLogger.ThrottledError(
+                "missing-sensor",
+                TimeSpan.FromMinutes(5),
+                "Windows did not expose a SimpleOrientationSensor.");
+            return false;
+        }
+
+        var currentOrientation = _sensor.GetCurrentOrientation();
+
+        /*
+         * Calibration describes the fixed relationship between
+         * the Legion Go 2 orientation sensor and its display.
+         *
+         * Only calculate it once per application launch.
+         */
+        if (_sensorToDisplayOffset is null)
+        {
+            TryCalibrate(currentOrientation);
+        }
+
+        _sensor.OrientationChanged += OrientationChanged;
+
+        IsRunning = true;
+
+        /*
+         * Auto-rotation may have been stopped while the user
+         * physically rotated the device.
+         *
+         * Immediately synchronize the screen with the current
+         * sensor orientation when auto-rotation is enabled again.
+         */
+        if (TryGetQuarterTurn(currentOrientation, out _))
+        {
+            ScheduleRotation(currentOrientation);
+        }
+
         return true;
-
-    _sensor ??= SimpleOrientationSensor.GetDefault();
-
-    if (_sensor is null)
-        return false;
-
-    var currentOrientation = _sensor.GetCurrentOrientation();
-
-    /*
-     * Calibration describes the fixed relationship between
-     * the Legion Go 2 orientation sensor and its display.
-     *
-     * Only calculate it once per application launch.
-     */
-    if (_sensorToDisplayOffset is null)
-    {
-        TryCalibrate(currentOrientation);
     }
-
-    _sensor.OrientationChanged += OrientationChanged;
-
-    IsRunning = true;
-
-    /*
-     * Auto-rotation may have been stopped while the user
-     * physically rotated the device.
-     *
-     * Immediately synchronize the screen with the current
-     * sensor orientation when auto-rotation is enabled again.
-     */
-    if (TryGetQuarterTurn(currentOrientation, out _))
-    {
-        ScheduleRotation(currentOrientation);
-    }
-
-    return true;
-}
 
     public void Stop()
     {
@@ -147,18 +161,21 @@ internal sealed class AutoRotateController : IDisposable
                 var target =
                     (_sensorToDisplayOffset.Value - sensorTurn + 4) & 3;
 
-                DisplayRotator.TryRotateTo(target);
+                if (!DisplayRotator.TryRotateTo(target))
+                {
+                    AppLogger.ThrottledError(
+                        "missing-internal-display",
+                        TimeSpan.FromMinutes(5),
+                        "No active internal display was found; rotation skipped.");
+                }
             }
             catch (OperationCanceledException)
             {
                 // Another orientation event replaced this one.
             }
-            catch
+            catch (Exception ex)
             {
-                /*
-                 * For now we silently ignore a rotation failure.
-                 * Later we can add logging or tray notifications.
-                 */
+                AppLogger.Error("Unexpected auto-rotation failure.", ex);
             }
         });
     }

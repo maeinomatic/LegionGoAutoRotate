@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -30,10 +31,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
             null,
             (_, _) => ExitApplication());
 
+        var openDiagnosticsMenuItem = new ToolStripMenuItem(
+            "Open Diagnostics Folder",
+            null,
+            (_, _) => OpenDiagnosticsFolder());
+
         _contextMenu = new ContextMenuStrip();
 
         _contextMenu.Items.Add(_startMenuItem);
         _contextMenu.Items.Add(_stopMenuItem);
+        _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add(openDiagnosticsMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(exitMenuItem);
 
@@ -63,6 +71,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         if (!started)
         {
+            AppLogger.ThrottledError(
+                "auto-rotate-start-failed",
+                TimeSpan.FromMinutes(5),
+                "Auto-rotation could not be started.");
+
             MessageBox.Show(
                 "Windows did not expose a SimpleOrientationSensor.",
                 "Legion Go Auto Rotate",
@@ -71,6 +84,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         UpdateMenuState();
+    }
+
+    private static void OpenDiagnosticsFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppLogger.LogDirectory);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = AppLogger.LogDirectory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("Failed to open diagnostics folder.", ex);
+        }
     }
 
     private void StopAutoRotate()
