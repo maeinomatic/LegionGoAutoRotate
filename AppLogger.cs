@@ -5,9 +5,7 @@ internal static class AppLogger
     private static readonly object LogLock = new();
     private static readonly Dictionary<string, DateTimeOffset> LastThrottledWrites = new();
 
-    public static string LogDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LegionGoAutoRotate");
+    public static string LogDirectory { get; } = AppPaths.AppDataDirectory;
 
     public static string LogPath { get; } = Path.Combine(
         LogDirectory,

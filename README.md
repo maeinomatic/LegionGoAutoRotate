@@ -10,8 +10,9 @@ Recent Windows 11 gaming-handheld behavior can leave the Legion Go 2 without the
 * Uses the Legion Go 2's built-in orientation sensor
 * Runs silently in the Windows system tray
 * Start or stop automatic rotation from the tray icon
+* Optional per-user Start with Windows support
 * Does not change the Windows `DeviceForm` setting
-* Does not automatically start with Windows
+* Does not automatically start with Windows unless explicitly enabled
 * No .NET installation required when using the self-contained release
 
 ## Installation
@@ -28,6 +29,8 @@ Right-click the tray icon to access:
 
 * **Start Auto Rotate** — enables automatic screen rotation
 * **Stop Auto Rotate** — pauses automatic screen rotation
+* **Start with Windows** — toggles per-user Windows startup
+* **Open Diagnostics Folder** — opens the local diagnostics folder
 * **Exit** — closes the application
 
 When automatic rotation is stopped, the current display orientation remains unchanged.

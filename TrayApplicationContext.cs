@@ -11,10 +11,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private readonly ToolStripMenuItem _startMenuItem;
     private readonly ToolStripMenuItem _stopMenuItem;
+    private readonly ToolStripMenuItem _startWithWindowsMenuItem;
 
     public TrayApplicationContext()
     {
         _autoRotateController = new AutoRotateController();
+        AppSettingsStore.Load();
 
         _startMenuItem = new ToolStripMenuItem(
             "Start Auto Rotate",
@@ -36,11 +38,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
             null,
             (_, _) => OpenDiagnosticsFolder());
 
+        _startWithWindowsMenuItem = new ToolStripMenuItem(
+            "Start with Windows",
+            null,
+            (_, _) => ToggleStartWithWindows())
+        {
+            CheckOnClick = false,
+            Checked = StartupRegistration.IsEnabled()
+        };
+
         _contextMenu = new ContextMenuStrip();
 
         _contextMenu.Items.Add(_startMenuItem);
         _contextMenu.Items.Add(_stopMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
+        _contextMenu.Items.Add(_startWithWindowsMenuItem);
         _contextMenu.Items.Add(openDiagnosticsMenuItem);
         _contextMenu.Items.Add(new ToolStripSeparator());
         _contextMenu.Items.Add(exitMenuItem);
@@ -104,6 +116,27 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private void ToggleStartWithWindows()
+    {
+        var enable = !_startWithWindowsMenuItem.Checked;
+
+        try
+        {
+            StartupRegistration.SetEnabled(enable);
+            _startWithWindowsMenuItem.Checked = StartupRegistration.IsEnabled();
+        }
+        catch
+        {
+            _startWithWindowsMenuItem.Checked = StartupRegistration.IsEnabled();
+
+            MessageBox.Show(
+                "Windows startup registration could not be updated. See diagnostics for details.",
+                "Legion Go Auto Rotate",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     private void StopAutoRotate()
     {
         _autoRotateController.Stop();
@@ -118,6 +151,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _stopMenuItem.Enabled =
             _autoRotateController.IsRunning;
+
+        _startWithWindowsMenuItem.Checked =
+            StartupRegistration.IsEnabled();
     }
 
     private void ExitApplication()
