@@ -18,6 +18,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
     private readonly Task _monitorTask;
 
     private ControllerDockState _currentState = ControllerDockState.Unknown;
+    private bool _hasReceivedControllerReport;
 
     public LegionControllerDockMonitor()
     {
@@ -33,6 +34,17 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             lock (_stateLock)
             {
                 return _currentState;
+            }
+        }
+    }
+
+    public bool HasReceivedControllerReport
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _hasReceivedControllerReport;
             }
         }
     }
@@ -143,7 +155,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             if (!TryParseDockState(buffer, bytesRead, out var state))
                 continue;
 
-            SetState(state);
+            SetState(state, hasReceivedControllerReport: true);
         }
 
         SetState(ControllerDockState.Unknown);
@@ -193,21 +205,31 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         };
     }
 
-    private void SetState(ControllerDockState state)
+    private void SetState(
+        ControllerDockState state,
+        bool hasReceivedControllerReport = false)
     {
         ControllerDockState previous;
+        bool previousHasReceivedControllerReport;
 
         lock (_stateLock)
         {
-            if (_currentState == state)
+            if (_currentState == state &&
+                _hasReceivedControllerReport == hasReceivedControllerReport)
+            {
                 return;
+            }
 
             previous = _currentState;
+            previousHasReceivedControllerReport = _hasReceivedControllerReport;
             _currentState = state;
+            _hasReceivedControllerReport = hasReceivedControllerReport;
         }
 
         AppLogger.Info(
-            $"Controller dock state changed: {previous} -> {state}.");
+            "Controller dock state changed: " +
+            $"{previous} (ready={previousHasReceivedControllerReport}) -> " +
+            $"{state} (ready={hasReceivedControllerReport}).");
 
         DockStateChanged?.Invoke(
             this,
@@ -422,6 +444,10 @@ internal sealed record ControllerDockState(
 
     public bool BothDocked =>
         Left == ControllerConnectionState.Docked &&
+        Right == ControllerConnectionState.Docked;
+
+    public bool AnyDocked =>
+        Left == ControllerConnectionState.Docked ||
         Right == ControllerConnectionState.Docked;
 }
 
