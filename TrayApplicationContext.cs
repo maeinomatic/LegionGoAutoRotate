@@ -208,10 +208,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ApplyAutoRotatePolicy()
     {
+        var controllerState = _controllerDockMonitor.CurrentState;
+        var hasControllerReport = _controllerDockMonitor.HasReceivedControllerReport;
+
         _controllersBlockRotation =
             !_settings.RotateWithControllersAttached &&
-            (!_controllerDockMonitor.HasReceivedControllerReport ||
-                _controllerDockMonitor.CurrentState.AnyDocked);
+            (!hasControllerReport || controllerState.AnyDocked);
 
         if (_autoRotateRequested && !_controllersBlockRotation)
         {
@@ -221,6 +223,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             _autoRotateController.Stop();
         }
+
+        AppLogger.Info(
+            "Auto-rotate policy: " +
+            $"requested={_autoRotateRequested}, " +
+            $"rotateWithControllersAttached={_settings.RotateWithControllersAttached}, " +
+            $"controllerReady={hasControllerReport}, " +
+            $"controllerState={controllerState}, " +
+            $"controllersBlockRotation={_controllersBlockRotation}, " +
+            $"isRunning={_autoRotateController.IsRunning}.");
 
         UpdateMenuState();
     }

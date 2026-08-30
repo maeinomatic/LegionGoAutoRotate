@@ -60,7 +60,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
                 if (devicePath is null)
                 {
-                    SetState(ControllerDockState.Unknown);
+                    ResetStateUntilFirstControllerReport();
                     await Task.Delay(TimeSpan.FromSeconds(5), token);
                     continue;
                 }
@@ -79,7 +79,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
                     "Controller dock monitor failed.",
                     ex);
 
-                SetState(ControllerDockState.Unknown);
+                ResetStateUntilFirstControllerReport();
 
                 try
                 {
@@ -112,7 +112,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
         if (handle.IsInvalid)
         {
-            SetState(ControllerDockState.Unknown);
+            ResetStateUntilFirstControllerReport();
             await Task.Delay(TimeSpan.FromSeconds(5), token);
             return;
         }
@@ -157,8 +157,6 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
             SetState(state, hasReceivedControllerReport: true);
         }
-
-        SetState(ControllerDockState.Unknown);
     }
 
     private static bool TryParseDockState(
@@ -234,6 +232,14 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         DockStateChanged?.Invoke(
             this,
             new ControllerDockStateChangedEventArgs(state));
+    }
+
+    private void ResetStateUntilFirstControllerReport()
+    {
+        if (HasReceivedControllerReport)
+            return;
+
+        SetState(ControllerDockState.Unknown);
     }
 
     public void Dispose()
