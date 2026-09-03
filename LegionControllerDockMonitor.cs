@@ -55,17 +55,21 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         {
             try
             {
-                var devicePath = HidApi.Enumerate()
-                    .FirstOrDefault(IsLegionGo2StatusInterface);
+                var devicePaths = HidApi.Enumerate()
+                    .Where(IsLegionGo2StatusInterface)
+                    .ToArray();
 
-                if (devicePath is null)
+                if (devicePaths.Length == 0)
                 {
                     ResetStateUntilFirstControllerReport();
                     await Task.Delay(TimeSpan.FromSeconds(5), token);
                     continue;
                 }
 
-                await ReadReportsAsync(devicePath, token);
+                foreach (var devicePath in devicePaths)
+                {
+                    await ReadReportsAsync(devicePath, token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -127,6 +131,8 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             bufferSize: 64,
             isAsync: true);
 
+        var loggedUnrecognizedReport = false;
+
         while (!token.IsCancellationRequested)
         {
             var buffer = new byte[64];
@@ -134,10 +140,28 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
             try
             {
-                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-                readTimeout.CancelAfter(TimeSpan.FromSeconds(2));
+                var readTask = stream.ReadAsync(buffer, token).AsTask();
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2), token);
+                var completedTask = await Task.WhenAny(readTask, timeoutTask);
 
-                bytesRead = await stream.ReadAsync(buffer, readTimeout.Token);
+                if (completedTask != readTask)
+                {
+                    if (token.IsCancellationRequested)
+                        break;
+
+                    AppLogger.ThrottledError(
+                        "controller-dock-report-timeout",
+                        TimeSpan.FromMinutes(5),
+                        "Controller dock monitor did not receive an input report.");
+
+                    _ = readTask.ContinueWith(
+                        task => _ = task.Exception,
+                        TaskContinuationOptions.OnlyOnFaulted);
+
+                    break;
+                }
+
+                bytesRead = await readTask;
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
@@ -153,7 +177,18 @@ internal sealed class LegionControllerDockMonitor : IDisposable
                 break;
 
             if (!TryParseDockState(buffer, bytesRead, out var state))
+            {
+                if (!loggedUnrecognizedReport)
+                {
+                    AppLogger.Info(
+                        $"Unrecognized controller dock report ({bytesRead} bytes): " +
+                        FormatReport(buffer, bytesRead));
+
+                    loggedUnrecognizedReport = true;
+                }
+
                 continue;
+            }
 
             SetState(state, hasReceivedControllerReport: true);
         }
@@ -178,6 +213,22 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             buffer[1] == 0x3C &&
             buffer[2] == 0x74;
 
+        var controllersOffHeader =
+            bytesRead >= 4 &&
+            buffer[0] == 0x04 &&
+            buffer[1] == 0x00 &&
+            buffer[2] == 0x04 &&
+            buffer[3] == 0x0A;
+
+        if (controllersOffHeader)
+        {
+            state = new ControllerDockState(
+                ControllerConnectionState.Off,
+                ControllerConnectionState.Off);
+
+            return true;
+        }
+
         if (!attachedHeader && !detachedHeader)
             return false;
 
@@ -201,6 +252,12 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             0x01 => ControllerConnectionState.Off,
             _ => ControllerConnectionState.Unknown
         };
+    }
+
+    private static string FormatReport(byte[] buffer, int bytesRead)
+    {
+        var length = Math.Min(bytesRead, 32);
+        return BitConverter.ToString(buffer, 0, length).Replace("-", " ");
     }
 
     private void SetState(
