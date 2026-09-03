@@ -28,6 +28,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     public TrayApplicationContext()
     {
+        AppLogger.Info("Application tray context starting.");
+
         _uiContext = SynchronizationContext.Current;
         _autoRotateController = new AutoRotateController();
         _controllerDockMonitor = new LegionControllerDockMonitor();
