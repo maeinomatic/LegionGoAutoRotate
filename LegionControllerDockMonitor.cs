@@ -63,6 +63,8 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
     private async Task MonitorAsync(CancellationToken token)
     {
+        // Unrelated reports and reconnects must not restart the startup deadline.
+        var initialDetectionTimeout = Task.Delay(TimeSpan.FromSeconds(2), token);
         while (!token.IsCancellationRequested)
         {
             try
@@ -82,7 +84,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
                 foreach (var devicePath in devicePaths)
                 {
-                    await ReadReportsAsync(devicePath, token);
+                    await ReadReportsAsync(devicePath, initialDetectionTimeout, token);
                 }
             }
             catch (OperationCanceledException)
@@ -143,7 +145,10 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         return LegionGo2ProductIds.Any(pid => lower.Contains($"pid_{pid:x4}"));
     }
 
-    private async Task ReadReportsAsync(string devicePath, CancellationToken token)
+    private async Task ReadReportsAsync(
+        string devicePath,
+        Task initialDetectionTimeout,
+        CancellationToken token)
     {
         using var handle = HidApi.CreateHandle(devicePath, out var hasWriteAccess);
 
@@ -179,10 +184,10 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
                 if (!HasCompletedInitialDetection)
                 {
-                    var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2), token);
-                    var completedTask = await Task.WhenAny(readTask, timeoutTask);
+                    await Task.WhenAny(readTask, initialDetectionTimeout);
 
-                    if (completedTask != readTask)
+                    // Process an available report before allowing the startup fallback.
+                    if (!readTask.IsCompleted)
                     {
                         if (token.IsCancellationRequested)
                             break;
@@ -221,6 +226,12 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
             if (!TryParseDockState(buffer, bytesRead, out var state))
             {
+                if (initialDetectionTimeout.IsCompleted && !token.IsCancellationRequested)
+                {
+                    CompleteInitialDetection(
+                        "No usable controller status report arrived during startup.");
+                }
+
                 if (!loggedUnrecognizedReport)
                 {
                     AppLogger.Info(
