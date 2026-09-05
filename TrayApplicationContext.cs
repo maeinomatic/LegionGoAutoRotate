@@ -25,6 +25,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private bool _autoRotateRequested = true;
     private bool _controllersBlockRotation;
+    private bool _waitingForControllerState;
 
     public TrayApplicationContext()
     {
@@ -32,8 +33,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _uiContext = SynchronizationContext.Current;
         _autoRotateController = new AutoRotateController();
-        _controllerDockMonitor = new LegionControllerDockMonitor();
-        _controllerDockMonitor.DockStateChanged += ControllerDockStateChanged;
         _settings = AppSettingsStore.Load();
         _activeIcon = TrayIconLoader.Load("TrayActive");
         _pausedIcon = TrayIconLoader.Load("TrayPaused");
@@ -101,6 +100,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = _contextMenu,
             Visible = true
         };
+
+        _controllerDockMonitor = new LegionControllerDockMonitor();
+        _controllerDockMonitor.DockStateChanged += ControllerDockStateChanged;
 
         /*
          * Starting the application means auto-rotation starts.
@@ -212,10 +214,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         var controllerState = _controllerDockMonitor.CurrentState;
         var hasControllerReport = _controllerDockMonitor.HasReceivedControllerReport;
+        var initialDetectionComplete =
+            _controllerDockMonitor.HasCompletedInitialDetection;
+
+        _waitingForControllerState =
+            !_settings.RotateWithControllersAttached &&
+            !initialDetectionComplete;
 
         _controllersBlockRotation =
             !_settings.RotateWithControllersAttached &&
-            (!hasControllerReport || controllerState.AnyDocked);
+            (_waitingForControllerState || controllerState.AnyDocked);
 
         if (_autoRotateRequested && !_controllersBlockRotation)
         {
@@ -230,6 +238,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             "Auto-rotate policy: " +
             $"requested={_autoRotateRequested}, " +
             $"rotateWithControllersAttached={_settings.RotateWithControllersAttached}, " +
+            $"initialDetectionComplete={initialDetectionComplete}, " +
             $"controllerReady={hasControllerReport}, " +
             $"controllerState={controllerState}, " +
             $"controllersBlockRotation={_controllersBlockRotation}, " +
@@ -257,6 +266,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void UpdateTrayIcon()
     {
+        if (_autoRotateRequested && _waitingForControllerState)
+        {
+            _notifyIcon.Icon = _pausedIcon;
+            _notifyIcon.Text = "Legion Go Auto Rotate - Checking Controller State";
+            return;
+        }
+
         if (_autoRotateRequested && _controllersBlockRotation)
         {
             _notifyIcon.Icon = _controllerBlockedIcon;
@@ -267,7 +283,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_autoRotateRequested && _autoRotateController.IsRunning)
         {
             _notifyIcon.Icon = _activeIcon;
-            _notifyIcon.Text = "Legion Go Auto Rotate - Active";
+            _notifyIcon.Text =
+                _controllerDockMonitor.HasReceivedControllerReport ||
+                _settings.RotateWithControllersAttached
+                    ? "Legion Go Auto Rotate - Active"
+                    : "Legion Go Auto Rotate - Active (Controller State Unavailable)";
             return;
         }
 
@@ -290,11 +310,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private string GetCurrentStateDescription()
     {
+        if (_autoRotateRequested && _waitingForControllerState)
+            return "Checking controller state";
+
         if (_autoRotateRequested && _controllersBlockRotation)
             return "Paused because controllers are attached";
 
         if (_autoRotateRequested && _autoRotateController.IsRunning)
-            return "Active";
+        {
+            return _controllerDockMonitor.HasReceivedControllerReport ||
+                   _settings.RotateWithControllersAttached
+                ? "Active"
+                : "Active; controller state unavailable";
+        }
 
         return "Paused";
     }
