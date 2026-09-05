@@ -19,6 +19,7 @@ internal sealed class LegionControllerDockMonitor : IDisposable
 
     private ControllerDockState _currentState = ControllerDockState.Unknown;
     private bool _hasReceivedControllerReport;
+    private bool _hasCompletedInitialDetection;
 
     public LegionControllerDockMonitor()
     {
@@ -49,6 +50,17 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         }
     }
 
+    public bool HasCompletedInitialDetection
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _hasCompletedInitialDetection;
+            }
+        }
+    }
+
     private async Task MonitorAsync(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
@@ -62,6 +74,8 @@ internal sealed class LegionControllerDockMonitor : IDisposable
                 if (devicePaths.Length == 0)
                 {
                     ResetStateUntilFirstControllerReport();
+                    CompleteInitialDetection(
+                        "No Legion Go 2 controller status interface was found.");
                     await Task.Delay(TimeSpan.FromSeconds(5), token);
                     continue;
                 }
@@ -75,6 +89,23 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             {
                 break;
             }
+            catch (IOException ex)
+            {
+                AppLogger.Info(
+                    "Controller status interface disconnected; reconnecting. " +
+                    ex.Message);
+
+                ResetStateUntilFirstControllerReport();
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
             catch (Exception ex)
             {
                 AppLogger.ThrottledError(
@@ -84,6 +115,8 @@ internal sealed class LegionControllerDockMonitor : IDisposable
                     ex);
 
                 ResetStateUntilFirstControllerReport();
+                CompleteInitialDetection(
+                    "Controller status detection failed before a usable report was received.");
 
                 try
                 {
@@ -117,6 +150,8 @@ internal sealed class LegionControllerDockMonitor : IDisposable
         if (handle.IsInvalid)
         {
             ResetStateUntilFirstControllerReport();
+            CompleteInitialDetection(
+                "The controller status interface could not be opened.");
             await Task.Delay(TimeSpan.FromSeconds(5), token);
             return;
         }
@@ -141,24 +176,25 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             try
             {
                 var readTask = stream.ReadAsync(buffer, token).AsTask();
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2), token);
-                var completedTask = await Task.WhenAny(readTask, timeoutTask);
 
-                if (completedTask != readTask)
+                if (!HasCompletedInitialDetection)
                 {
-                    if (token.IsCancellationRequested)
-                        break;
+                    var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2), token);
+                    var completedTask = await Task.WhenAny(readTask, timeoutTask);
 
-                    AppLogger.ThrottledError(
-                        "controller-dock-report-timeout",
-                        TimeSpan.FromMinutes(5),
-                        "Controller dock monitor did not receive an input report.");
+                    if (completedTask != readTask)
+                    {
+                        if (token.IsCancellationRequested)
+                            break;
 
-                    _ = readTask.ContinueWith(
-                        task => _ = task.Exception,
-                        TaskContinuationOptions.OnlyOnFaulted);
+                        AppLogger.ThrottledError(
+                            "controller-dock-report-timeout",
+                            TimeSpan.FromMinutes(5),
+                            "Controller dock monitor did not receive an input report during startup.");
 
-                    break;
+                        CompleteInitialDetection(
+                            "No usable controller status report arrived during startup.");
+                    }
                 }
 
                 bytesRead = await readTask;
@@ -170,11 +206,18 @@ internal sealed class LegionControllerDockMonitor : IDisposable
                     TimeSpan.FromMinutes(5),
                     "Controller dock monitor did not receive an input report.");
 
+                CompleteInitialDetection(
+                    "No usable controller status report arrived during startup.");
+
                 break;
             }
 
             if (bytesRead <= 0)
+            {
+                CompleteInitialDetection(
+                    "The controller status interface closed without a usable report.");
                 break;
+            }
 
             if (!TryParseDockState(buffer, bytesRead, out var state))
             {
@@ -212,22 +255,6 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             buffer[0] == 0x04 &&
             buffer[1] == 0x3C &&
             buffer[2] == 0x74;
-
-        var controllersOffHeader =
-            bytesRead >= 4 &&
-            buffer[0] == 0x04 &&
-            buffer[1] == 0x00 &&
-            buffer[2] == 0x04 &&
-            buffer[3] == 0x0A;
-
-        if (controllersOffHeader)
-        {
-            state = new ControllerDockState(
-                ControllerConnectionState.Off,
-                ControllerConnectionState.Off);
-
-            return true;
-        }
 
         if (!attachedHeader && !detachedHeader)
             return false;
@@ -279,12 +306,37 @@ internal sealed class LegionControllerDockMonitor : IDisposable
             previousHasReceivedControllerReport = _hasReceivedControllerReport;
             _currentState = state;
             _hasReceivedControllerReport = hasReceivedControllerReport;
+
+            if (hasReceivedControllerReport)
+                _hasCompletedInitialDetection = true;
         }
 
         AppLogger.Info(
             "Controller dock state changed: " +
             $"{previous} (ready={previousHasReceivedControllerReport}) -> " +
             $"{state} (ready={hasReceivedControllerReport}).");
+
+        DockStateChanged?.Invoke(
+            this,
+            new ControllerDockStateChangedEventArgs(state));
+    }
+
+    private void CompleteInitialDetection(string reason)
+    {
+        ControllerDockState state;
+
+        lock (_stateLock)
+        {
+            if (_hasCompletedInitialDetection)
+                return;
+
+            _hasCompletedInitialDetection = true;
+            state = _currentState;
+        }
+
+        AppLogger.Info(
+            "Initial controller dock detection completed without a usable report. " +
+            $"Controller state remains unknown. {reason}");
 
         DockStateChanged?.Invoke(
             this,
